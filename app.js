@@ -50,7 +50,7 @@ const store = {
 
 const params = new URLSearchParams(location.search);
 if (params.has('demo')) Object.assign(CONFIG, DEMO);
-if (params.has('reset')) ['intro', 'start', 'best'].forEach(store.del);
+if (params.has('reset')) ['start', 'best'].forEach(store.del);
 
 const SHOW = (() => {
   if (!CONFIG.datum) return null;
@@ -1141,7 +1141,6 @@ Scenes.reveal = {
 };
 $('#to-hub').addEventListener('click', (e) => {
   FX.burst(e.clientX, e.clientY, 60); Sound.whoosh(0.8, 300, 2000, 0.1);
-  store.set('intro', '1');
   go('hub');
 });
 
@@ -1934,7 +1933,7 @@ async function boot() {
   } catch (e) {}
   const start = params.get('scene');
   if (start && Scenes[start]) go(start);
-  else go(store.get('intro') ? 'hub' : 'dark');
+  else go('dark'); // altijd beginnen in het donker
   requestAnimationFrame(frame);
 }
 boot();
