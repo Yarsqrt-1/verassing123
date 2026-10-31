@@ -1,5 +1,5 @@
 // Bewaart de app op de telefoon, zodat hij ook zonder internet in het theater opent.
-const CACHE = 'tijdverdrijver-v10';
+const CACHE = 'tijdverdrijver-v11';
 const FILES = ['./', 'index.html', 'app.js', 'gl.js', 'vendor/three.module.min.js', 'vendor/RoomEnvironment.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/icon-180.png'];
 
 self.addEventListener('install', (e) => {
@@ -12,7 +12,9 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   // Eerst het netwerk (zodat aanpassingen doorkomen), anders de bewaarde versie
   e.respondWith(
-    fetch(e.request)
+    // no-cache: altijd even bij de server navragen of er een nieuwere versie is (de HTTP-cache van GitHub Pages
+    // zou anders tot 10 minuten een oude versie geven)
+    fetch(e.request, { cache: 'no-cache' })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});

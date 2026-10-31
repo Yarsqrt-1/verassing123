@@ -304,6 +304,14 @@ document.addEventListener('visibilitychange', () => {
   if (!Sound.ctx) return;
   if (document.hidden) Sound.ctx.suspend(); else Sound.ctx.resume();
 });
+// Een telefoon hervat een app vaak waar hij was. Was hij langer dan een minuut weg, dan begint hij weer in het donker.
+let hiddenAt = 0;
+const restart = () => { if (sceneName && sceneName !== 'dark' && !params.get('scene')) go('dark'); };
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) hiddenAt = Date.now();
+  else if (hiddenAt && Date.now() - hiddenAt > 60000) restart();
+});
+addEventListener('pageshow', (e) => { if (e.persisted) restart(); });
 addEventListener('pointerdown', () => Sound.init(), { capture: true });
 // Volledig scherm zodra het mag: browsers staan dat pas toe bij de eerste aanraking
 addEventListener('pointerdown', () => goFullscreen(), { capture: true });
