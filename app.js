@@ -1505,19 +1505,16 @@ function drawMist(g, a, b, prog, life, t, seed) {
   const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
   const at = (k) => { const w = Math.sin(k * 9 - t * 12 + seed) * 7 * k; return [a.x + dx * k + nx * w, a.y + dy * k + ny * w]; };
   g.save(); g.globalCompositeOperation = 'lighter';
-  const n = 18;
+  const n = 24;
   for (let i = 0; i <= n; i++) {
-    const k = (i / n) * prog, [x, y] = at(k), r = 6 + k * 30;
+    const k = (i / n) * prog, [x, y] = at(k), r = 12 + k * 48;
     const gr = g.createRadialGradient(x, y, 0, x, y, r);
-    gr.addColorStop(0, `rgba(235,242,255,${0.3 * life})`); gr.addColorStop(1, 'rgba(200,220,255,0)');
+    gr.addColorStop(0, `rgba(235,242,255,${0.24 * life})`); gr.addColorStop(0.5, `rgba(215,228,255,${0.1 * life})`); gr.addColorStop(1, 'rgba(200,220,255,0)');
     g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
   }
-  g.beginPath();
-  for (let i = 0; i <= n; i++) { const [x, y] = at((i / n) * prog); i ? g.lineTo(x, y) : g.moveTo(x, y); }
-  g.strokeStyle = `rgba(245,250,255,${0.55 * life})`; g.lineWidth = 2; g.lineCap = 'round'; g.stroke();
   if (prog >= 1) {
     // de nevel slaat als een schild open voor de Dementor
-    const [x, y] = at(1), r = 44 * (1.4 - life * 0.4);
+    const [x, y] = at(1), r = 64 * (1.4 - life * 0.4);
     const gr = g.createRadialGradient(x, y, 0, x, y, r);
     gr.addColorStop(0, `rgba(240,246,255,${0.5 * life})`); gr.addColorStop(1, 'rgba(200,220,255,0)');
     g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
@@ -1525,11 +1522,19 @@ function drawMist(g, a, b, prog, life, t, seed) {
   g.restore();
 }
 
-/* De lijfelijke Patronus: een zilveren hinde in galop (kijkt naar rechts, maat 1 = lichaamslengte) */
-function drawDoe(g, x, y, S, face, ph, alpha) {
-  g.save(); g.translate(x, y); g.scale(face * S, S);
+/* De lijfelijke Patronus: een zilveren hinde in galop. Ze wordt eerst op een eigen canvas getekend
+   (zodat overlappende delen niet extra oplichten) en daarna met een gloed over het spel gelegd. */
+const doeCanvas = document.createElement('canvas'), doeCtx = doeCanvas.getContext('2d');
+let doeBox = null;
+function renderDoe(S, ph) {
+  const cw = Math.ceil(S * 1.7), ch = Math.ceil(S * 1.6), ox = S * 0.75, oy = S * 0.85;
+  const pw = Math.ceil(cw * DPR), phh = Math.ceil(ch * DPR);
+  if (doeCanvas.width !== pw || doeCanvas.height !== phh) { doeCanvas.width = pw; doeCanvas.height = phh; }
+  const g = doeCtx;
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, pw, phh);
+  g.setTransform(DPR * S, 0, 0, DPR * S, DPR * ox, DPR * oy);
   g.translate(0, Math.sin(ph * 2) * 0.035); g.rotate(Math.sin(ph * 2 + 0.8) * 0.06);
-  // een vloeiende contour: romp, hals, kop met grote oren, borst en buik
+
   const body = new Path2D();
   body.moveTo(-0.40, -0.10);
   body.bezierCurveTo(-0.26, -0.19, 0.04, -0.15, 0.2, -0.15);
@@ -1548,30 +1553,58 @@ function drawDoe(g, x, y, S, face, ph, alpha) {
   body.quadraticCurveTo(-0.5, -0.12, -0.47, -0.15);
   body.quadraticCurveTo(-0.43, -0.12, -0.40, -0.10);
   body.closePath();
-  // slanke poten: dij en onderbeen, met knie of hak die meebuigt in galop
-  const upper = new Path2D(), lower = new Path2D();
-  const leg = (hx, hy, l1, l2, a1, a2) => {
-    const kx = hx + Math.sin(a1) * l1, ky = hy + Math.cos(a1) * l1;
-    upper.moveTo(hx, hy); upper.lineTo(kx, ky);
-    lower.moveTo(kx, ky); lower.lineTo(kx + Math.sin(a1 + a2) * l2, ky + Math.cos(a1 + a2) * l2);
+
+  // taps toelopende poten met ronde gewrichten en hoefjes
+  g.fillStyle = 'rgb(132,160,222)';
+  const limb = (ax, ay, bx, by, wa, wb) => {
+    const dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
+    g.beginPath();
+    g.moveTo(ax + nx * wa / 2, ay + ny * wa / 2); g.lineTo(bx + nx * wb / 2, by + ny * wb / 2);
+    g.lineTo(bx - nx * wb / 2, by - ny * wb / 2); g.lineTo(ax - nx * wa / 2, ay - ny * wa / 2); g.closePath(); g.fill();
+    g.beginPath(); g.arc(bx, by, wb / 2, 0, TAU); g.fill();
   };
-  for (const off of [0, 0.45]) {
+  const leg = (hx, hy, l1, l2, a1, a2, w) => {
+    const kx = hx + Math.sin(a1) * l1, ky = hy + Math.cos(a1) * l1;
+    const fx = kx + Math.sin(a1 + a2) * l2, fy = ky + Math.cos(a1 + a2) * l2;
+    limb(hx, hy, kx, ky, w, w * 0.5); limb(kx, ky, fx, fy, w * 0.5, w * 0.32);
+  };
+  for (const off of [0.45, 0]) {
     const f = ph + off, b = ph + Math.PI + off;
-    leg(0.24, 0.06, 0.21, 0.23, 0.65 * Math.sin(f), -1.1 * Math.max(0, Math.sin(f - 1.2)));
-    leg(-0.31, 0.04, 0.19, 0.27, 0.55 * Math.sin(b) - 0.1, 0.9 * Math.max(0, Math.sin(b + 1.2)) + 0.15);
+    leg(0.24, 0.02, 0.24, 0.23, 0.65 * Math.sin(f), -1.1 * Math.max(0, Math.sin(f - 1.2)), 0.085);
+    leg(-0.3, 0.0, 0.23, 0.27, 0.55 * Math.sin(b) - 0.1, 0.9 * Math.max(0, Math.sin(b + 1.2)) + 0.15, 0.11);
   }
-  const legs = new Path2D(); legs.addPath(upper); legs.addPath(lower);
+  g.fill(body);
+
+  // licht van binnenuit: een kern, schouder, heup en kop
+  g.globalCompositeOperation = 'source-atop';
+  const glow = (x, y, r, a) => {
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, `rgba(255,255,255,${a})`); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
+  };
+  glow(0.02, -0.06, 0.5, 0.22); glow(0.24, -0.05, 0.17, 0.32); glow(-0.27, -0.05, 0.17, 0.28); glow(0.52, -0.43, 0.15, 0.38);
+  glow(0.24, 0.2, 0.2, 0.18); glow(-0.3, 0.2, 0.2, 0.15);
+  // stromende zilveren draden door het lichaam
+  g.lineCap = 'round'; g.setLineDash([0.09, 0.07]);
+  g.lineDashOffset = -ph * 0.06;
+  g.strokeStyle = 'rgba(255,255,255,.55)'; g.lineWidth = 0.014;
+  for (const [y0, y1, y2] of [[-0.1, -0.12, -0.08], [0.0, 0.03, 0.02], [0.07, 0.09, 0.06]]) {
+    g.beginPath(); g.moveTo(-0.42, y0); g.bezierCurveTo(-0.1, y1, 0.15, y2, 0.36, y0 - 0.04); g.stroke();
+  }
+  g.beginPath(); g.moveTo(0.26, -0.12); g.bezierCurveTo(0.36, -0.26, 0.42, -0.36, 0.6, -0.4); g.stroke();
+  g.setLineDash([]);
+  // een heldere rand rond de vorm
+  g.globalCompositeOperation = 'source-over';
+  g.strokeStyle = 'rgba(235,245,255,.85)'; g.lineWidth = 0.01; g.stroke(body);
+  return (doeBox = { cw, ch, ox, oy });
+}
+function drawDoe(g, x, y, S, face, ph, alpha, reuse) {
+  const m = reuse && doeBox ? doeBox : renderDoe(S, ph);
+  g.save(); g.translate(x, y); g.scale(face, 1);
   g.globalCompositeOperation = 'lighter';
-  g.lineCap = 'round'; g.lineJoin = 'round';
-  g.shadowColor = `rgba(170,200,255,${alpha})`; g.shadowBlur = 28;
-  g.fillStyle = `rgba(190,212,255,${0.3 * alpha})`; g.fill(body);
-  g.strokeStyle = `rgba(190,212,255,${0.4 * alpha})`; g.lineWidth = 0.055; g.stroke(upper); g.lineWidth = 0.035; g.stroke(lower);
-  g.shadowBlur = 0;
-  const core = g.createRadialGradient(0.05, -0.12, 0, 0.05, -0.12, 0.75);
-  core.addColorStop(0, `rgba(255,255,255,${0.7 * alpha})`); core.addColorStop(1, `rgba(205,222,255,${0.22 * alpha})`);
-  g.fillStyle = core; g.fill(body);
-  g.strokeStyle = `rgba(235,244,255,${0.6 * alpha})`; g.lineWidth = 0.04; g.stroke(upper); g.lineWidth = 0.025; g.stroke(lower);
-  g.strokeStyle = `rgba(245,250,255,${0.55 * alpha})`; g.lineWidth = 0.01; g.stroke(body);
+  g.globalAlpha = clamp(alpha * 0.85);
+  if (!reuse) { g.shadowColor = 'rgba(150,180,255,.8)'; g.shadowBlur = 20; }
+  g.drawImage(doeCanvas, -m.ox, -m.oy, m.cw, m.ch);
   g.restore();
 }
 
@@ -1730,8 +1763,8 @@ Scenes.game = {
       const u = d.t / d.dur, p = catmull(d.path, ease(Math.min(1, u)) * 0.85 + Math.min(1, u) * 0.15);
       d.face = p.x >= d.last.x ? 1 : -1; d.last = d.pos || p; d.pos = p;
       if (Math.random() < 0.9) FX.emit(p.x, p.y, 3, 0.9, SILVER);
-      const S = Math.min(W, H) * 0.42;
-      for (const s of this.shades) if (!s.dying && dist(p, s) < S * 0.45 + s.size * 0.6) { this.score += 10 * s.syms.length; s.syms = []; this.banish(s); }
+      const S = Math.min(W, H) * 0.32;
+      for (const s of this.shades) if (!s.dying && dist(p, s) < S * 0.55 + s.size * 0.6) { this.score += 10 * s.syms.length; s.syms = []; this.banish(s); }
       if (u >= 1) {
         for (const s of this.shades) if (!s.dying) { this.score += 10 * s.syms.length; s.syms = []; this.banish(s); }
         this.doe = null; this.charge = 0;
@@ -1778,14 +1811,14 @@ Scenes.game = {
     }
     g.globalCompositeOperation = 'source-over';
     if (this.doe && this.doe.pos) {
-      const d = this.doe, u = d.t / d.dur, S = Math.min(W, H) * 0.42;
+      const d = this.doe, u = d.t / d.dur, S = Math.min(W, H) * 0.32;
       const grow = ease(clamp(d.t / 0.5)), alpha = Math.min(clamp(d.t / 0.3), clamp((1 - u) / 0.15));
-      // een vage naglans achter de hinde
-      for (let k = 3; k >= 1; k--) {
-        const q = catmull(d.path, clamp(ease(Math.min(1, u)) * 0.85 + Math.min(1, u) * 0.15 - k * 0.025));
-        drawDoe(g, q.x, q.y, S * (0.4 + 0.6 * grow), d.face, d.t * 11 - k * 0.5, alpha * 0.12 * (4 - k));
-      }
       drawDoe(g, d.pos.x, d.pos.y, S * (0.4 + 0.6 * grow), d.face, d.t * 11, alpha);
+      // een vage naglans achter de hinde, met dezelfde pose
+      for (let k = 1; k <= 3; k++) {
+        const q = catmull(d.path, clamp(ease(Math.min(1, u)) * 0.85 + Math.min(1, u) * 0.15 - k * 0.025));
+        drawDoe(g, q.x, q.y, S * (0.4 + 0.6 * grow), d.face, d.t * 11, alpha * 0.1 * (4 - k), true);
+      }
     }
 
     // de toverstok, van onderen in beeld
