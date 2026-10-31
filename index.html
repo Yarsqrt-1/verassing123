@@ -255,10 +255,14 @@ body[data-scene="reveal"] .reveal-lines .r3 { animation: materialize 2.2s cubic-
   box-shadow: 0 25px 60px rgba(0,0,0,.7), inset 0 0 40px rgba(216,176,98,.06);
   pointer-events: auto;
 }
+#g-intro { gap: .75rem; padding: 1.4rem 1.2rem; max-height: calc(100% - 110px); }
+#g-intro p { font-size: 1.02rem; line-height: 1.38; }
+#g-intro p.tip { font-size: .92rem; }
+@media (max-height: 700px) { #g-intro .eyebrow { display: none; } #g-intro { gap: .6rem; } }
 .panel h2 { margin: 0; font-family: var(--f-title); font-size: 1.5rem; line-height: 1.2; color: var(--gold-hi); text-wrap: balance; }
 .panel p { margin: 0; font-size: 1.15rem; line-height: 1.45; text-wrap: balance; }
-.glyphs { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-.glyphs svg { width: 44px; height: 44px; padding: 8px; border-radius: 10px; border: 1px solid rgba(216,176,98,.35); background: rgba(216,176,98,.06); }
+.glyphs { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.glyphs svg { width: 38px; height: 38px; padding: 7px; border-radius: 10px; border: 1px solid rgba(216,176,98,.35); background: rgba(216,176,98,.06); }
 .glyphs path, .glyphs circle { fill: none; stroke: var(--gold-hi); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 3px rgba(255,207,122,.8)); }
 .panel .tip { font-size: 1rem; color: var(--mist); font-style: italic; }
 .panel .score { font-family: var(--f-title); font-size: 3.6rem; line-height: 1; color: var(--gold-hi); text-shadow: 0 0 24px rgba(255,190,90,.6); }
@@ -340,15 +344,17 @@ body[data-scene="reveal"] .reveal-lines .r3 { animation: materialize 2.2s cubic-
   <div class="panel" id="g-intro">
     <div class="eyebrow">Een spel voor na de voorstelling</div>
     <h2>Verjaag de Dementors</h2>
-    <p>Dementors komen op je af en zuigen alle warmte uit je weg. Denk aan je gelukkigste herinnering en teken het teken dat boven een Dementor gloeit: een zilveren nevel uit je toverstok drijft hem terug.</p>
-    <div class="glyphs" aria-label="De vijf tekens: liggende streep, staande streep, V, omgekeerde V en cirkel">
+    <p>Dementors zuigen alle warmte uit je weg. Denk aan je gelukkigste herinnering en teken het teken boven een Dementor: een zilveren nevel uit je toverstok drijft hem terug.</p>
+    <div class="glyphs" aria-label="De zes tekens: liggende streep, staande streep, V, omgekeerde V, cirkel en bliksemschicht">
       <svg viewBox="0 0 28 28"><path d="M3 14h22"/></svg>
       <svg viewBox="0 0 28 28"><path d="M14 3v22"/></svg>
       <svg viewBox="0 0 28 28"><path d="M4 5l10 18 10-18"/></svg>
       <svg viewBox="0 0 28 28"><path d="M4 23L14 5l10 18"/></svg>
       <svg viewBox="0 0 28 28"><circle cx="14" cy="14" r="10"/></svg>
+      <svg viewBox="0 0 28 28"><path d="M18 3L9 15h10L10 25"/></svg>
     </div>
-    <p class="tip">Eén teken raakt álle Dementors met dat teken vooraan. Elke verjaagde Dementor maakt je herinnering sterker. Gloeit je toverstok helemaal op? Tik erop en roep je Patronus op in volle gedaante.</p>
+    <p class="tip">Eén teken raakt hooguit twee Dementors. Gloeit je toverstok helemaal op? Tik erop en roep je Patronus op in volle gedaante.</p>
+    <p class="tip">Pas op voor Dooddoeners: daar helpt geen Patronus tegen. Tik op een Dooddoener voor <i>Expelliarmus</i>, of houd je vinger stil op het scherm voor een <i>Protego</i>-schild. Zie je een chocoladekikker? Tik erop, dan warm je weer op.</p>
     <div class="row">
       <button class="btn" id="g-start">Begin</button>
       <button class="btn ghost" data-quit>Terug</button>

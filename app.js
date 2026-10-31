@@ -1315,13 +1315,14 @@ $('#replay').addEventListener('click', () => { Sound.whoosh(1, 2000, 200, 0.12);
 /* =========================================================================
    6. Spel: Verjaag de Dementors
    ========================================================================= */
-const GLYPHS = ['h', 'v', 'V', 'A', 'O'];
+const GLYPHS = ['h', 'v', 'V', 'A', 'O', 'Z'];
 function glyphPath(sym, s) {
   const p = new Path2D(), h = s / 2;
   if (sym === 'h') { p.moveTo(-h, 0); p.lineTo(h, 0); }
   else if (sym === 'v') { p.moveTo(0, -h); p.lineTo(0, h); }
   else if (sym === 'V') { p.moveTo(-h, -h); p.lineTo(0, h); p.lineTo(h, -h); }
   else if (sym === 'A') { p.moveTo(-h, h); p.lineTo(0, -h); p.lineTo(h, h); }
+  else if (sym === 'Z') { p.moveTo(h * 0.4, -h); p.lineTo(-h * 0.3, h * 0.08); p.lineTo(h * 0.3, -h * 0.08); p.lineTo(-h * 0.4, h); }
   else p.arc(0, 0, h, 0, TAU);
   return p;
 }
@@ -1338,7 +1339,20 @@ function drawGlyph(g, sym, x, y, s, bright) {
   g.restore();
 }
 
-/* Herken een getekend teken: streep, staaf, V, dakje of cirkel */
+/* Vereenvoudig een lijn tot de punten die ertoe doen (Douglas-Peucker) */
+function simplify(pts, eps) {
+  if (pts.length < 3) return pts.slice();
+  const a = pts[0], b = pts[pts.length - 1], dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1;
+  let far = 0, idx = 0;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = L > 1 ? Math.abs((pts[i].x - a.x) * dy - (pts[i].y - a.y) * dx) / L : dist(pts[i], a);
+    if (d > far) { far = d; idx = i; }
+  }
+  if (far <= eps) return [a, b];
+  return simplify(pts.slice(0, idx + 1), eps).slice(0, -1).concat(simplify(pts.slice(idx), eps));
+}
+
+/* Herken een getekend teken: streep, staaf, V, dakje, cirkel of bliksemschicht */
 function recognize(pts) {
   if (pts.length < 4) return null;
   let len = 0, minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -1378,6 +1392,25 @@ function recognize(pts) {
     if (deg < 28 || deg > 152) return 'h';
     if (deg > 62 && deg < 118) return 'v';
     return null;
+  }
+  // Bliksemschicht: vereenvoudig de lijn tot zijn hoofdpunten. Een bliksem heeft drie stukken die
+  // om en om naar links en rechts gaan, terwijl de lijn de hele tijd dezelfde kant op omlaag (of omhoog)
+  // blijft gaan. Een V of dakje heeft er twee en keert halverwege om.
+  if (bh > 0.45 * size) {
+    const key = simplify(pts, size * 0.07);
+    if (key.length >= 4 && key.length <= 5) {
+      const down = b.y > a.y;
+      let ext = a.y, back = 0, flips = 0, lastSx = 0;
+      for (const p of key) { ext = down ? Math.max(ext, p.y) : Math.min(ext, p.y); back = Math.max(back, Math.abs(p.y - ext)); }
+      for (let i = 1; i < key.length; i++) {
+        const dx = key[i].x - key[i - 1].x;
+        if (Math.abs(dx) < size * 0.08) continue;
+        const sx = Math.sign(dx);
+        if (lastSx && sx !== lastSx) flips++;
+        lastSx = sx;
+      }
+      if (flips >= 2 && Math.abs(b.y - a.y) > 0.6 * bh && back < 0.22 * bh) return 'Z';
+    }
   }
   if (bw > 0.3 * size && bh > 0.3 * size) {
     let iMax = 0, iMin = 0;
@@ -1622,15 +1655,100 @@ function catmull(pts, u) {
   return { x: c(p0.x, p1.x, p2.x, p3.x), y: c(p0.y, p1.y, p2.y, p3.y) };
 }
 
+/* Een Dooddoener: lange zwarte mantel met puntkap, zilveren masker, de toverstok op jou gericht */
+function drawDeathEater(g, e, t, aimAt) {
+  const S = e.S, vis = e.vis;
+  if (vis <= 0.01) return;
+  g.save(); g.translate(e.x, e.y + Math.sin(t * 1.3 + e.phase) * 3);
+  // zwarte rook waarin hij verschijnt en verdwijnt
+  const smoke = Math.max(e.smoke, 0.25);
+  for (let i = 0; i < 7; i++) {
+    const ang = i * 0.9 + t * 0.6 + e.phase, rr = S * (0.35 + 0.25 * Math.sin(t * 1.7 + i));
+    const x = Math.cos(ang) * rr, y = S * 0.35 + Math.sin(ang) * rr * 0.6, r = S * (0.45 + 0.15 * Math.sin(t + i));
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, `rgba(4,4,8,${0.55 * smoke})`); gr.addColorStop(1, 'rgba(4,4,8,0)');
+    g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  g.globalAlpha = vis;
+  // mantel
+  const robe = new Path2D();
+  robe.moveTo(0, -S * 0.82);
+  robe.bezierCurveTo(S * 0.12, -S * 0.7, S * 0.2, -S * 0.5, S * 0.3, -S * 0.36);
+  robe.bezierCurveTo(S * 0.38, -S * 0.1, S * 0.4, S * 0.4, S * 0.46, S * 0.78);
+  for (let i = 0; i <= 8; i++) { const u = i / 8; robe.lineTo(S * (0.46 - u * 0.92), S * (0.78 + (i % 2 ? -0.08 : 0.02) + Math.sin(t * 3 + i + e.phase) * 0.03)); }
+  robe.bezierCurveTo(-S * 0.4, S * 0.4, -S * 0.38, -S * 0.1, -S * 0.3, -S * 0.36);
+  robe.bezierCurveTo(-S * 0.2, -S * 0.5, -S * 0.12, -S * 0.7, 0, -S * 0.82);
+  const rg = g.createLinearGradient(-S * 0.4, 0, S * 0.4, 0);
+  rg.addColorStop(0, '#050508'); rg.addColorStop(0.45, '#15151d'); rg.addColorStop(1, '#060609');
+  g.fillStyle = rg; g.fill(robe);
+  g.strokeStyle = 'rgba(120,130,170,.18)'; g.lineWidth = 1; g.stroke(robe);
+  // de kap en het zilveren masker
+  g.fillStyle = '#020203'; g.beginPath(); g.ellipse(0, -S * 0.46, S * 0.15, S * 0.2, 0, 0, TAU); g.fill();
+  const mg = g.createLinearGradient(-S * 0.12, -S * 0.6, S * 0.12, -S * 0.32);
+  mg.addColorStop(0, '#f2f4f8'); mg.addColorStop(0.5, '#a9afbd'); mg.addColorStop(1, '#5c6170');
+  g.fillStyle = mg; g.beginPath(); g.ellipse(0, -S * 0.46, S * 0.115, S * 0.16, 0, 0, TAU); g.fill();
+  g.fillStyle = '#05050a';
+  for (const sx of [-1, 1]) { g.beginPath(); g.ellipse(sx * S * 0.048, -S * 0.5, S * 0.034, S * 0.022, sx * 0.35, 0, TAU); g.fill(); }
+  g.beginPath(); g.moveTo(0, -S * 0.46); g.lineTo(-S * 0.018, -S * 0.42); g.lineTo(S * 0.018, -S * 0.42); g.fill();
+  g.strokeStyle = 'rgba(40,44,58,.7)'; g.lineWidth = 0.8;
+  g.beginPath(); g.moveTo(-S * 0.09, -S * 0.56); g.quadraticCurveTo(0, -S * 0.62, S * 0.09, -S * 0.56); g.stroke();
+  g.beginPath(); g.moveTo(-S * 0.07, -S * 0.37); g.quadraticCurveTo(0, -S * 0.34, S * 0.07, -S * 0.37); g.stroke();
+  // arm met toverstok, gericht op jouw toverstok
+  const hand = { x: e.side * S * 0.05, y: -S * 0.1 }, ang = Math.atan2(aimAt.y - (e.y + hand.y), aimAt.x - (e.x + hand.x));
+  g.strokeStyle = '#08080c'; g.lineWidth = S * 0.12; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(e.side * S * 0.22, -S * 0.3); g.quadraticCurveTo(e.side * S * 0.1, -S * 0.15, hand.x, hand.y); g.stroke();
+  g.fillStyle = '#c9c3b8'; g.beginPath(); g.arc(hand.x, hand.y, S * 0.045, 0, TAU); g.fill();
+  g.restore();
+  if (!e.disarmed) {
+    const hx = e.x + hand.x, hy = e.y + hand.y + Math.sin(t * 1.3 + e.phase) * 3;
+    e.tip = { x: hx + Math.cos(ang) * S * 0.5, y: hy + Math.sin(ang) * S * 0.5 };
+    drawWand(g, e.tip, { x: hx - Math.cos(ang) * S * 0.08, y: hy - Math.sin(ang) * S * 0.08 }, S * 0.05, '255,60,45', e.glow, vis);
+  }
+}
+
+/* Een chocoladekikker die over het scherm springt */
+function drawFrog(g, f, t) {
+  const u = f.u, air = f.air;
+  g.save(); g.translate(f.x, f.y); g.scale(f.dir * u, u);
+  const gl = g.createRadialGradient(0, 0, 0, 0, 0, 40);
+  gl.addColorStop(0, 'rgba(255,200,120,.22)'); gl.addColorStop(1, 'rgba(255,200,120,0)');
+  g.fillStyle = gl; g.fillRect(-40, -40, 80, 80);
+  const choc = g.createLinearGradient(0, -14, 0, 12);
+  choc.addColorStop(0, '#8a5530'); choc.addColorStop(1, '#3d2112');
+  g.fillStyle = choc;
+  // achterpoten: gestrekt in de lucht, gevouwen op de grond
+  g.beginPath();
+  if (air) { g.ellipse(-16, 8, 14, 4, 0.5, 0, TAU); g.ellipse(-24, 15, 9, 3, 0.2, 0, TAU); }
+  else { g.ellipse(-10, 6, 11, 7, 0, 0, TAU); }
+  g.fill();
+  g.beginPath(); g.ellipse(0, 0, 17, 11, 0, 0, TAU); g.fill();                 // lijf
+  g.beginPath(); g.ellipse(13, -4, 9, 7, 0, 0, TAU); g.fill();                 // kop
+  g.beginPath(); g.ellipse(8, 9, 3, 6, air ? -0.6 : 0.3, 0, TAU); g.fill();   // voorpootje
+  for (const ex of [9, 17]) {                                                    // ogen
+    g.fillStyle = '#6b3f22'; g.beginPath(); g.arc(ex, -10, 4, 0, TAU); g.fill();
+    g.fillStyle = '#f6e7cf'; g.beginPath(); g.arc(ex + 0.8, -10.6, 1.4, 0, TAU); g.fill();
+  }
+  g.strokeStyle = 'rgba(255,220,180,.35)'; g.lineWidth = 1.5;                   // glans
+  g.beginPath(); g.ellipse(-2, -4, 10, 4, -0.15, Math.PI * 1.1, Math.PI * 1.8); g.stroke();
+  g.restore();
+}
+
 Scenes.game = {
   enter() {
-    this.state = 'intro'; this.shades = []; this.beams = []; this.stroke = null; this.fade = []; this.waves = []; this.doe = null;
+    this.state = 'intro'; this.reset();
     this.best = +store.get('best') || 0;
     $('#g-best').textContent = this.best;
     $('#g-intro').hidden = false; $('#g-over').hidden = true; $('#g-hud').hidden = true;
-    this.cold = 0; this.charge = 0; this.lives = 3; this.aim = 0; this.aimT = 0;
     this.layout();
     Sound.setMood('calm');
+  },
+  reset() {
+    Object.assign(this, {
+      score: 0, warmth: 3, charge: 0, time: 0, spawnT: 0.4, shades: [], beams: [], stroke: null, fade: [], waves: [],
+      banished: 0, cold: 0, chargedSaid: false, doe: null, aim: 0, aimT: 0,
+      eaters: [], bolts: [], zaps: [], flying: [], eaterT: 38, frog: null, frogT: 26,
+      press: null, shield: 0, shieldOn: false, shieldHit: 0, stun: 0,
+    });
   },
   exit() { this.state = 'off'; },
   resize() { this.layout(); },
@@ -1650,26 +1768,41 @@ Scenes.game = {
     this.aim = clamp(a, -0.6, 0.75); this.aimT = 0.5;
   },
   start() {
-    Object.assign(this, { state: 'play', score: 0, lives: 3, charge: 0, time: 0, spawnT: 0.4, shades: [], beams: [], stroke: null, fade: [], waves: [], banished: 0, cold: 0, chargedSaid: false, doe: null, aim: 0 });
+    this.reset(); this.state = 'play';
     $('#g-intro').hidden = true; $('#g-over').hidden = true; $('#g-hud').hidden = false;
     $('#g-score').textContent = 0; $('#g-best').textContent = this.best;
-    $$('#g-flames i').forEach((f) => f.classList.remove('out'));
+    this.showWarmth();
     Sound.setMood('tense'); Sound.chord([659.26, 987.77, 1318.51], 0.06, 0.06); vib(30);
   },
+  showWarmth() {
+    $$('#g-flames i').forEach((f, i) => {
+      const k = clamp(this.warmth - i);
+      f.classList.toggle('out', k <= 0.02);
+      f.style.opacity = k > 0.02 ? 0.35 + 0.65 * k : '';
+    });
+  },
+  loseWarmth(n) {
+    this.warmth = Math.max(0, this.warmth - n);
+    this.showWarmth();
+    if (this.warmth <= 0 && this.state === 'play') this.over();
+  },
+  /* Steeds moeilijker, zonder plafond */
   spawn() {
     const T = this.time;
-    const maxSyms = T < 15 ? 1 : T < 35 ? 2 : T < 60 ? 3 : 4;
+    const maxSyms = T < 15 ? 1 : T < 35 ? 2 : T < 60 ? 3 : T < 110 ? 4 : 5;
     const n = 1 + Math.floor(Math.pow(Math.random(), 1.4) * maxSyms);
-    const syms = this.banished < 3 && T < 12 ? [['h', 'v', 'O'][this.shades.length % 3]] : Array.from({ length: n }, () => pick(GLYPHS));
+    const pool = T < 20 ? GLYPHS.filter((g) => g !== 'Z') : GLYPHS;
+    const syms = this.banished < 3 && T < 12 ? [['h', 'v', 'O'][this.shades.length % 3]] : Array.from({ length: n }, () => pick(pool));
     const u = this.unit, size = (44 + n * 5) * u;
-    const speed = (40 + Math.min(T, 150) * 0.42) * u * (n >= 3 ? 0.8 : 1);
+    const speed = (40 + Math.min(T, 150) * 0.42 + Math.max(0, T - 150) * 0.15) * u * (n >= 3 ? 0.8 : 1);
     this.shades.push({
       x: rand(W * 0.2, W * 0.8), y: -size * 0.3, size, vy: speed, syms, phase: rand(10), drift: rand(TAU),
       hit: 0, dying: 0, breathed: false, seeds: Array.from({ length: 13 }, () => Math.random()),
     });
   },
+  /* Een teken raakt hooguit twee Dementors: de laagste, dus de gevaarlijkste, eerst */
   cast(sym) {
-    const targets = this.shades.filter((s) => !s.dying && s.syms[0] === sym && s.y > -s.size);
+    const targets = this.shades.filter((s) => !s.dying && s.syms[0] === sym && s.y > -s.size).sort((a, b) => b.y - a.y).slice(0, 2);
     if (!targets.length) { Sound.whoosh(0.3, 800, 300, 0.05); return false; }
     this.aimAt(targets[0]);
     const tip = this.tip();
@@ -1679,7 +1812,7 @@ Scenes.game = {
       this.beams.push({ a: { x: tip.x, y: tip.y }, x: s.x, y: s.y - s.size * 0.3, life: 1, prog: 0, seed: rand(TAU) });
       if (!s.syms.length) { this.banish(s); killed++; }
     }
-    if (killed > 1) { this.score += 25 * killed; this.toast(`${killed}× tegelijk!`); }
+    if (killed > 1) { this.score += 25; this.toast('2× tegelijk!'); }
     Sound.whoosh(0.45, 900, 2600, 0.07);
     Sound.chord([987.77, 1318.51].map((f) => f * (1 + targets.length * 0.06)), 0.04, 0.05);
     vib(18);
@@ -1688,12 +1821,14 @@ Scenes.game = {
   },
   banish(s) {
     s.dying = 0.001; s.vy = -520 * this.unit; this.banished++;
-    this.score += 25; this.charge = Math.min(1, this.charge + 0.13);
+    this.score += 25;
+    if (!this.doe) this.charge = Math.min(1, this.charge + 0.075);
     FX.burst(s.x, s.y - s.size * 0.3, 55, SILVER);
     Sound.bell(pick([1318.51, 1567.98, 1975.5]), 0.05, 1.6, 0.05);
     if (this.charge >= 1 && !this.chargedSaid) { this.chargedSaid = true; this.toast('Tik op je toverstok!'); Sound.chord([659.26, 830.6, 987.77, 1318.51], 0.05, 0.05); }
   },
-  /* Expecto Patronum: een zilveren hinde springt uit de toverstok en galoppeert door de Dementors */
+  /* Expecto Patronum: een zilveren hinde springt uit de toverstok en galoppeert door de Dementors.
+     Tegen Dooddoeners helpt een Patronus niet: daar rent ze dwars doorheen. */
   patronus() {
     this.charge = 0; this.chargedSaid = false; this.aim = 0;
     const tip = this.tip();
@@ -1703,55 +1838,87 @@ Scenes.game = {
     this.fade.push({ text: 'Expecto Patronum!', life: 2.2, y: H * 0.4, big: true });
     Sound.chord([329.63, 493.88, 659.26, 987.77, 1318.51, 1975.5], 0.05, 0.09); Sound.whoosh(2.2, 300, 2400, 0.1);
     vib([40, 30, 80, 30, 120]);
-    // galoppeer naar de kant met de meeste Dementors, zigzag omhoog en dan weg
     const left = this.shades.filter((s) => !s.dying && s.x < W / 2).length >= this.shades.filter((s) => !s.dying && s.x >= W / 2).length;
     const sx = left ? 1 : -1, m = (v) => (sx > 0 ? v : W - v);
     this.doe = {
       t: 0, dur: 3.2, last: { ...tip },
       path: [{ x: tip.x, y: tip.y }, { x: m(W * 0.18), y: H * 0.6 }, { x: m(W * 0.85), y: H * 0.42 }, { x: m(W * 0.18), y: H * 0.24 }, { x: m(W * 0.7), y: H * 0.06 }, { x: m(W * 1.1), y: -H * 0.2 }],
     };
-    $('#g-score').textContent = this.score;
   },
-  hitPlayer(s) {
-    s.dying = 0.001; s.vy = 0;
-    this.lives--; FX.shake = 0.6; FX.flash = 0.45; FX.flashRGB = '170,200,255';
-    Sound.thud(); vib([200, 60, 120]);
-    $$('#g-flames i').forEach((f, i) => f.classList.toggle('out', i >= this.lives));
-    if (this.lives <= 0) this.over();
+  /* Dooddoeners verschijnen in zwarte rook, richten, en schieten een Paralyseer-spreuk */
+  spawnEater() {
+    const u = this.unit, side = Math.random() < 0.5 ? -1 : 1;
+    this.eaters.push({
+      x: side < 0 ? rand(W * 0.14, W * 0.36) : rand(W * 0.64, W * 0.86), y: rand(H * 0.16, H * 0.42), S: 74 * u,
+      side: -side, phase: rand(10), state: 'appear', t: 0, vis: 0, smoke: 1, glow: 0, disarmed: false, tip: null,
+      aimDur: Math.max(0.9, 1.9 - (this.time - 38) * 0.006),
+    });
+    Sound.whoosh(0.6, 200, 900, 0.1); Sound.thud(0.15);
+  },
+  expelliarmus(e) {
+    const tip = this.tip();
+    this.aimAt(e);
+    this.zaps.push({ a: { x: tip.x, y: tip.y }, b: { ...(e.tip || e) }, life: 1 });
+    if (e.tip) this.flying.push({ x: e.tip.x, y: e.tip.y, vx: rand(-90, 90) * this.unit, vy: -260 * this.unit, rot: 0, vr: rand(-12, 12), life: 1.4, S: e.S });
+    e.disarmed = true; e.state = 'leave'; e.t = 0; e.glow = 0;
+    this.score += 50; $('#g-score').textContent = this.score;
+    this.fade.push({ text: 'Expelliarmus!', life: 1.2, y: H * 0.36 });
+    FX.burst(e.tip ? e.tip.x : e.x, e.tip ? e.tip.y : e.y, 40, ['255,90,70', '255,200,170', '255,255,255']);
+    Sound.zap(0.14); Sound.whoosh(0.4, 600, 2600, 0.08); vib([20, 20, 40]);
+  },
+  eatFrog() {
+    const f = this.frog; this.frog = null;
+    this.warmth = Math.min(3, this.warmth + 1); this.showWarmth();
+    this.fade.push({ text: 'Chocolade! Je warmt weer op', life: 1.5, y: H * 0.5 });
+    FX.burst(f.x, f.y, 45, ['255,214,140', '200,140,80', '255,240,210']);
+    Sound.chord([659.26, 830.6, 987.77], 0.06, 0.06); vib(25);
   },
   over() {
-    this.state = 'over'; this.stroke = null; this.doe = null;
+    this.state = 'over'; this.stroke = null; this.doe = null; this.press = null; this.shieldOn = false;
     const s = this.score, record = s > this.best;
     if (record) { this.best = s; store.set('best', String(s)); }
     $('#g-final').textContent = s;
     $('#g-verdict').textContent =
-      s >= 1500 ? 'Je Patronus is onverslaanbaar' :
-      s >= 800 ? 'De Dementors durven je niet meer te naderen' :
-      s >= 350 ? 'Een vaste hand en een warm hart' :
-                 'De Dementors waren je nu nog te snel af';
+      s >= 6000 ? 'Een Patronus om op te schrijven' :
+      s >= 3000 ? 'De Dementors durven je niet meer te naderen' :
+      s >= 1200 ? 'Een vaste hand en een warm hart' :
+                  'De Dementors waren je nu nog te snel af';
     $('#g-bestline').textContent = record && s > 0 ? 'Nieuw record!' : `Je record: ${this.best}`;
     $('#g-over').hidden = false; $('#g-hud').hidden = true;
     Sound.setMood('calm');
     setTimeout(() => Sound.chord([493.88, 587.33, 739.99, 987.77], 0.16, 0.06), 300);
   },
   toast(text) { this.fade.push({ text, life: 1.6, y: H * 0.42 }); },
-  down(p) { if (this.state === 'play') this.stroke = [p]; },
+  /* Invoer: tekenen = spreuk, stil vasthouden = Protego, tikken op een Dooddoener = Expelliarmus,
+     tikken op de kikker = chocolade, tikken op je opgeladen toverstok = Patronus */
+  down(p) {
+    if (this.state !== 'play' || this.stun > 0) return;
+    this.press = { x: p.x, y: p.y, t: this.time, moved: false };
+    this.stroke = [p];
+  },
   move(p) {
-    if (!this.stroke) return;
+    if (!this.press) return;
+    if (!this.press.moved && dist(p, this.press) > 12) this.press.moved = true;
+    if (this.shieldOn || !this.stroke) return;
     if (dist(p, this.stroke[this.stroke.length - 1]) > 3) { this.stroke.push(p); FX.emit(p.x, p.y, 2, 0.6, SILVER); }
   },
   up() {
+    this.press = null;
+    if (this.shieldOn) { this.shieldOn = false; this.stroke = null; return; }
     if (!this.stroke) return;
     const pts = this.stroke; this.stroke = null;
-    this.fade.push({ pts, life: 0.5 });
     let len = 0; for (let i = 1; i < pts.length; i++) len += dist(pts[i], pts[i - 1]);
     if (len < 28) {
-      // een tik op de toverstok (punt of steel) als de herinnering sterk genoeg is
+      const p = pts[0], u = this.unit;
+      if (this.frog && dist(p, this.frog) < 44 * u) return this.eatFrog();
+      const e = this.eaters.find((e) => !e.disarmed && e.vis > 0.3 && (dist(p, { x: e.x, y: e.y - e.S * 0.2 }) < e.S * 0.7 || (e.tip && dist(p, e.tip) < 36 * u)));
+      if (e) return this.expelliarmus(e);
       const tip = this.tip(), w = this.wand;
-      const onWand = dist(pts[0], tip) < 70 * this.unit || (pts[0].y > tip.y - 20 && Math.abs(pts[0].x - lerp(tip.x, w.px, (pts[0].y - tip.y) / (w.py - tip.y))) < 40 * this.unit);
+      const onWand = dist(p, tip) < 70 * u || (p.y > tip.y - 20 && Math.abs(p.x - lerp(tip.x, w.px, (p.y - tip.y) / (w.py - tip.y))) < 40 * u);
       if (onWand && this.charge >= 1 && !this.doe) this.patronus();
       return;
     }
+    this.fade.push({ pts, life: 0.5 });
     const sym = recognize(pts);
     if (sym) { if (this.cast(sym)) this.fade.push({ sym, life: 0.8 }); }
     else Sound.whoosh(0.25, 600, 250, 0.04);
@@ -1762,8 +1929,24 @@ Scenes.game = {
     this.aimT -= dt; if (this.aimT <= 0) this.aim = lerp(this.aim, 0, 0.06);
     for (const b of this.beams) { if (b.prog < 1) b.prog = Math.min(1, b.prog + dt / 0.16); else b.life -= dt * 2; }
     this.beams = this.beams.filter((b) => b.life > 0);
+    for (const z of this.zaps) z.life -= dt * 2.5;
+    this.zaps = this.zaps.filter((z) => z.life > 0);
+    for (const f of this.flying) { f.vy += 700 * this.unit * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.rot += f.vr * dt; f.life -= dt; }
+    this.flying = this.flying.filter((f) => f.life > 0);
+    this.shield = lerp(this.shield, this.shieldOn ? 1 : 0, 0.25);
+    this.shieldHit = Math.max(0, this.shieldHit - dt * 3);
     if (this.state !== 'play') { this.cold = lerp(this.cold, 0, 0.05); return; }
     this.time += dt;
+    const T = this.time, tip = this.tip();
+    this.stun = Math.max(0, this.stun - dt);
+
+    // Protego: vinger stil houden
+    if (this.press && !this.press.moved && !this.shieldOn && T - this.press.t > 0.28) {
+      this.shieldOn = true; this.stroke = null;
+      Sound.whoosh(0.4, 1400, 3000, 0.05); Sound.bell(1567.98, 0, 0.8, 0.025); vib(10);
+    }
+
+    // de hinde
     const d = this.doe;
     if (d) {
       d.t += dt;
@@ -1772,34 +1955,108 @@ Scenes.game = {
       if (Math.random() < 0.9) FX.emit(p.x, p.y, 3, 0.9, SILVER);
       const S = Math.min(W, H) * 0.32;
       for (const s of this.shades) if (!s.dying && dist(p, s) < S * 0.55 + s.size * 0.6) { this.score += 10 * s.syms.length; s.syms = []; this.banish(s); }
-      if (u >= 1) {
-        for (const s of this.shades) if (!s.dying) { this.score += 10 * s.syms.length; s.syms = []; this.banish(s); }
-        this.doe = null; this.charge = 0;
-      }
+      if (u >= 1) this.doe = null;
       $('#g-score').textContent = this.score;
-    } else this.spawnT -= dt;
-    if (this.spawnT <= 0) { this.spawn(); this.spawnT = Math.max(0.85, 2.4 - this.time * 0.025) * rand(0.75, 1.25); }
-    const tip = this.tip();
-    let cold = 0;
+    }
+
+    // Dementors
+    this.spawnT -= dt;
+    if (this.spawnT <= 0) { this.spawn(); this.spawnT = Math.max(0.5, 2.4 / (1 + T / 70)) * rand(0.75, 1.25); }
+    let cold = 0, drain = 0;
+    const zone = H * 0.22;
     for (let i = this.shades.length - 1; i >= 0; i--) {
       const s = this.shades[i];
       if (s.dying) { s.dying += dt * 1.6; s.y += s.vy * dt; if (s.dying >= 1) this.shades.splice(i, 1); continue; }
-      s.y += s.vy * dt * (this.doe ? 0.3 : 1);
-      s.x = clamp(s.x + Math.sin(this.time * 0.9 + s.drift) * 14 * dt, s.size, W - s.size);
+      s.y += s.vy * dt * (this.doe ? 0.6 : 1);
+      s.x = clamp(s.x + Math.sin(T * 0.9 + s.drift) * 14 * dt, s.size, W - s.size);
       s.hit = Math.max(0, s.hit - dt * 3);
       cold = Math.max(cold, clamp((s.y - H * 0.3) / (tip.y - H * 0.3)));
+      // dichtbij zuigen ze al warmte weg
+      drain += clamp((s.y - (tip.y - zone)) / zone) * 0.1;
       if (!s.breathed && s.y > H * 0.42) { s.breathed = true; Sound.breath(); }
-      if (s.y + s.size * 0.4 > tip.y - 10) this.hitPlayer(s);
+      if (s.y + s.size * 0.4 > tip.y - 10) {
+        s.dying = 0.001; s.vy = 0;
+        FX.shake = 0.6; FX.flash = 0.45; FX.flashRGB = '170,200,255';
+        Sound.thud(); vib([200, 60, 120]);
+        this.loseWarmth(1);
+        if (this.state !== 'play') return;
+      }
     }
     this.cold = lerp(this.cold, cold, 0.05);
+    if (drain > 0) this.loseWarmth(drain * dt);
+    if (this.state !== 'play') return;
+
+    // Dooddoeners
+    this.eaterT -= dt;
+    const maxEaters = T < 120 ? 1 : 2;
+    if (this.eaterT <= 0) {
+      if (this.eaters.filter((e) => !e.disarmed).length < maxEaters) this.spawnEater();
+      this.eaterT = Math.max(5, 14 - (T - 38) * 0.05) * rand(0.8, 1.2);
+    }
+    for (let i = this.eaters.length - 1; i >= 0; i--) {
+      const e = this.eaters[i];
+      e.t += dt;
+      if (e.state === 'appear') { e.vis = clamp(e.t / 0.6); e.smoke = 1 - e.vis * 0.6; if (e.t > 0.7) { e.state = 'aim'; e.t = 0; } }
+      else if (e.state === 'aim') {
+        e.glow = clamp(e.t / e.aimDur);
+        if (e.t >= e.aimDur && e.tip) {
+          this.bolts.push({ x: e.tip.x, y: e.tip.y, from: { ...e.tip }, t: 0, dur: Math.max(0.65, 1.05 - (T - 38) * 0.002) });
+          Sound.zap(0.1); Sound.whoosh(0.5, 2600, 500, 0.06);
+          e.state = 'cool'; e.t = 0; e.glow = 0.15;
+        }
+      } else if (e.state === 'cool') { if (e.t > 1.5) { e.state = 'aim'; e.t = 0; } }
+      else if (e.state === 'leave') { e.vis = clamp(1 - (e.t - 0.25) / 0.6); e.smoke = 1; if (e.t > 0.9) this.eaters.splice(i, 1); }
+    }
+    // Paralyseer-spreuken die op je afkomen
+    for (let i = this.bolts.length - 1; i >= 0; i--) {
+      const b = this.bolts[i];
+      b.t += dt;
+      const k = Math.min(1, b.t / b.dur), kk = k * (0.55 + 0.45 * k);
+      b.x = lerp(b.from.x, tip.x, kk); b.y = lerp(b.from.y, tip.y, kk);
+      const shieldR = 78 * this.unit;
+      if (this.shield > 0.6 && dist(b, tip) < shieldR) {
+        // Protego kaatst hem terug
+        this.bolts.splice(i, 1); this.shieldHit = 1; this.score += 15; $('#g-score').textContent = this.score;
+        FX.burst(b.x, b.y, 35, ['255,120,100', '220,232,255', '255,255,255']);
+        Sound.bell(1975.5, 0, 0.6, 0.05); Sound.whoosh(0.3, 3000, 900, 0.06); vib(15);
+        continue;
+      }
+      if (k >= 1) {
+        this.bolts.splice(i, 1);
+        FX.flash = 0.5; FX.flashRGB = '255,80,60'; FX.shake = 0.8;
+        FX.burst(tip.x, tip.y, 40, ['255,90,70', '255,180,150']);
+        Sound.thud(0.4); vib([120, 40, 160]);
+        this.stun = 1.2; this.stroke = null; this.press = null; this.shieldOn = false;
+        this.fade.push({ text: 'Verlamd!', life: 1.2, y: H * 0.5 });
+        this.loseWarmth(0.5);
+        if (this.state !== 'play') return;
+      }
+    }
+
+    // de chocoladekikker
+    this.frogT -= dt;
+    if (!this.frog && this.frogT <= 0) {
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      this.frog = { dir, x: dir > 0 ? -30 : W + 30, base: rand(H * 0.5, H * 0.66), y: 0, hop: 0, u: this.unit * 1.45, air: false };
+      this.frogT = (this.warmth < 3 ? rand(20, 32) : rand(38, 50));
+    }
+    if (this.frog) {
+      const f = this.frog;
+      f.hop += dt / 0.7;
+      const ph = f.hop % 1;
+      f.air = ph < 0.6;
+      if (f.air) f.x += f.dir * 120 * this.unit * dt;
+      f.y = f.base - (f.air ? Math.sin((ph / 0.6) * Math.PI) * 46 * this.unit : 0);
+      if (f.x < -50 || f.x > W + 50) this.frog = null;
+    }
   },
   drawBg(g, t) {
     const bgr = g.createLinearGradient(0, 0, 0, H);
     bgr.addColorStop(0, '#04050b'); bgr.addColorStop(1, '#141024');
     g.fillStyle = bgr; g.fillRect(0, 0, W, H);
     Stars.draw(g, t, 0.5);
-    // de warmte in je: een gloed onderin die afneemt als de Dementors dichterbij komen
-    const warm = this.state === 'play' ? clamp(0.25 + this.lives * 0.25 - this.cold * 0.35) : 1;
+    // de warmte in je: een gloed onderin die afneemt
+    const warm = this.state === 'play' ? clamp(this.warmth / 3 - this.cold * 0.2) : 1;
     const lg = g.createRadialGradient(W / 2, H * 1.05, 0, W / 2, H * 1.05, H * 0.75);
     lg.addColorStop(0, `rgba(255,170,90,${0.32 * warm})`); lg.addColorStop(1, 'rgba(255,170,90,0)');
     g.fillStyle = lg; g.fillRect(0, 0, W, H);
@@ -1808,20 +2065,36 @@ Scenes.game = {
     const sh = FX.shake > 0.01 ? FX.shake * 10 : 0;
     FX.shake *= 0.9;
     g.save(); if (sh) g.translate(rand(-sh, sh), rand(-sh, sh));
+    const tip = this.tip(), w = this.wand;
     for (const s of [...this.shades].sort((a, b) => a.y - b.y)) drawDementor(g, s, t);
+    for (const e of this.eaters) drawDeathEater(g, e, t, tip);
+    for (const f of this.flying) {
+      g.save(); g.translate(f.x, f.y); g.rotate(f.rot); g.globalAlpha = clamp(f.life);
+      drawWand(g, { x: f.S * 0.25, y: 0 }, { x: -f.S * 0.25, y: 0 }, f.S * 0.05, '255,60,45', 0, 1);
+      g.restore();
+    }
+    if (this.frog) drawFrog(g, this.frog, t);
 
     for (const b of this.beams) drawMist(g, b.a, b, b.prog, b.life, t, b.seed);
+    for (const z of this.zaps) drawBeam(g, z.a, z.b, '255,70,60', t, z.life, 2);
+    for (const b of this.bolts) {
+      const dx = b.x - b.from.x, dy = b.y - b.from.y, L = Math.hypot(dx, dy) || 1, tail = Math.min(L, 70 * this.unit);
+      drawBeam(g, { x: b.x - (dx / L) * tail, y: b.y - (dy / L) * tail }, b, '255,60,45', t, 0.8, 3);
+      g.save(); g.globalCompositeOperation = 'lighter';
+      const gr = g.createRadialGradient(b.x, b.y, 0, b.x, b.y, 22);
+      gr.addColorStop(0, 'rgba(255,240,230,.95)'); gr.addColorStop(0.3, 'rgba(255,80,60,.6)'); gr.addColorStop(1, 'rgba(255,60,45,0)');
+      g.fillStyle = gr; g.beginPath(); g.arc(b.x, b.y, 22, 0, TAU); g.fill(); g.restore();
+    }
     g.globalCompositeOperation = 'lighter';
-    for (const w of this.waves) {
-      g.strokeStyle = `rgba(225,236,255,${w.life * 0.7})`; g.lineWidth = 4 + w.life * 14;
-      g.beginPath(); g.arc(w.x, w.y, w.r, 0, TAU); g.stroke();
+    for (const wv of this.waves) {
+      g.strokeStyle = `rgba(225,236,255,${wv.life * 0.7})`; g.lineWidth = 4 + wv.life * 14;
+      g.beginPath(); g.arc(wv.x, wv.y, wv.r, 0, TAU); g.stroke();
     }
     g.globalCompositeOperation = 'source-over';
     if (this.doe && this.doe.pos) {
       const d = this.doe, u = d.t / d.dur, S = Math.min(W, H) * 0.32;
       const grow = ease(clamp(d.t / 0.5)), alpha = Math.min(clamp(d.t / 0.3), clamp((1 - u) / 0.15));
       drawDoe(g, d.pos.x, d.pos.y, S * (0.4 + 0.6 * grow), d.face, d.t * 11, alpha);
-      // een vage naglans achter de hinde, met dezelfde pose
       for (let k = 1; k <= 3; k++) {
         const q = catmull(d.path, clamp(ease(Math.min(1, u)) * 0.85 + Math.min(1, u) * 0.15 - k * 0.025));
         drawDoe(g, q.x, q.y, S * (0.4 + 0.6 * grow), d.face, d.t * 11, alpha * 0.1 * (4 - k), true);
@@ -1829,7 +2102,6 @@ Scenes.game = {
     }
 
     // de toverstok, van onderen in beeld
-    const tip = this.tip(), w = this.wand;
     const butt = { x: w.px - Math.cos(tip.a) * w.L * 0.25, y: w.py - Math.sin(tip.a) * w.L * 0.25 };
     const glow = this.state === 'play' ? 0.25 + this.charge * 0.75 * (this.charge >= 1 ? 0.75 + 0.25 * Math.sin(t * 8) : 1) : 0.3;
     drawWand(g, tip, butt, w.w, '215,228,255', glow, 1);
@@ -1840,7 +2112,21 @@ Scenes.game = {
       g.strokeStyle = this.charge >= 1 ? `rgba(240,246,255,${0.7 + Math.sin(t * 8) * 0.3})` : 'rgba(220,232,255,.85)';
       g.beginPath(); g.arc(tip.x, tip.y, r, -Math.PI / 2, -Math.PI / 2 + TAU * this.charge); g.stroke();
     }
+    // Protego: een glinsterende koepel voor je toverstok
+    if (this.shield > 0.02) {
+      const R = 78 * this.unit, a = this.shield;
+      g.save(); g.globalCompositeOperation = 'lighter';
+      const sg = g.createRadialGradient(tip.x, tip.y, R * 0.55, tip.x, tip.y, R);
+      sg.addColorStop(0, 'rgba(170,200,255,0)'); sg.addColorStop(0.85, `rgba(190,215,255,${0.16 * a + this.shieldHit * 0.3})`); sg.addColorStop(1, 'rgba(190,215,255,0)');
+      g.fillStyle = sg; g.beginPath(); g.arc(tip.x, tip.y, R, Math.PI, TAU); g.lineTo(tip.x + R, tip.y + R * 0.2); g.lineTo(tip.x - R, tip.y + R * 0.2); g.closePath(); g.fill();
+      g.strokeStyle = `rgba(225,238,255,${0.55 * a + this.shieldHit * 0.45})`; g.lineWidth = 1.6 + this.shieldHit * 3;
+      g.beginPath(); g.arc(tip.x, tip.y, R + Math.sin(t * 9) * 1.5, Math.PI * 1.03, Math.PI * 1.97); g.stroke();
+      g.strokeStyle = `rgba(225,238,255,${0.2 * a})`; g.lineWidth = 1;
+      for (let i = 1; i <= 3; i++) { g.beginPath(); g.arc(tip.x, tip.y, R * (0.55 + i * 0.12) + Math.sin(t * 5 + i) * 2, Math.PI * 1.15, Math.PI * 1.85); g.stroke(); }
+      g.restore();
+    }
     if (this.cold > 0.02) { g.globalAlpha = clamp(this.cold * 1.1); g.drawImage(this.frost, 0, 0, W, H); g.globalAlpha = 1; }
+    if (this.stun > 0) { g.fillStyle = `rgba(160,20,20,${0.22 * clamp(this.stun / 0.6)})`; g.fillRect(0, 0, W, H); }
 
     const drawStroke = (pts, alpha) => {
       if (pts.length < 2) return;
@@ -1849,7 +2135,7 @@ Scenes.game = {
       g.strokeStyle = `rgba(190,210,255,${0.3 * alpha})`; g.lineWidth = 14; g.stroke();
       g.strokeStyle = `rgba(245,248,255,${alpha})`; g.lineWidth = 3.5; g.stroke();
     };
-    if (this.stroke) drawStroke(this.stroke, 1);
+    if (this.stroke && !this.shieldOn) drawStroke(this.stroke, 1);
     for (let i = this.fade.length - 1; i >= 0; i--) {
       const f = this.fade[i];
       f.life -= 1 / 60;
